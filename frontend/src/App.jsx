@@ -3,6 +3,9 @@ import { api } from './api.js';
 import Login from './Login.jsx';
 import InviteSignup from './InviteSignup.jsx';
 import Home from './Home.jsx';
+import Dashboard from './Dashboard.jsx';
+import ScheduleView from './ScheduleView.jsx';
+import TeamView from './TeamView.jsx';
 import MyTasks from './MyTasks.jsx';
 import RecurringView from './RecurringView.jsx';
 import VaultView from './VaultView.jsx';
@@ -13,6 +16,20 @@ import VoiceCapture from './VoiceCapture.jsx';
 import ClientsManager from './ClientsManager.jsx';
 import MembersModal from './MembersModal.jsx';
 import TemplatesModal from './TemplatesModal.jsx';
+import { Icon } from './Icon.jsx';
+
+const PRIMARY = [
+  { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
+  { key: 'pipeline', label: 'Pipeline', icon: 'columns' },
+  { key: 'schedule', label: 'Schedule', icon: 'calendar' },
+  { key: 'team', label: 'Team', icon: 'people' },
+];
+const SECONDARY = [
+  { key: 'recurring', label: 'Recurring', icon: 'repeat' },
+  { key: 'tasks', label: 'My tasks', icon: 'check' },
+  { key: 'responsibilities', label: 'Roles', icon: 'clipboard' },
+  { key: 'vault', label: 'Vault', icon: 'lock' },
+];
 
 export default function App() {
   const [authed, setAuthed] = useState(null); // null = checking
@@ -21,14 +38,15 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [clients, setClients] = useState([]);
   const [members, setMembers] = useState([]);
-  const [openId, setOpenId] = useState(null);   // null = home / tasks view
-  const [view, setView] = useState('home');     // 'home' | 'tasks'
+  const [openId, setOpenId] = useState(null);
+  const [view, setView] = useState('dashboard');
   const [showNew, setShowNew] = useState(false);
   const [showVoice, setShowVoice] = useState(false);
   const [showClients, setShowClients] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [drawer, setDrawer] = useState(false);
 
   function clearInvite() {
     setInviteToken(null);
@@ -40,12 +58,10 @@ export default function App() {
     const r = await api.projects();
     setProjects(r.projects);
   }, []);
-
   const loadClients = useCallback(async () => {
     const r = await api.clients();
     setClients(r.clients);
   }, []);
-
   const loadMembers = useCallback(async () => {
     const r = await api.members();
     setMembers(r.members || []);
@@ -68,90 +84,90 @@ export default function App() {
     try { await loadProjects(); }
     catch (e) { if (e.unauthorized) setAuthed(false); }
   }
-
   async function reloadClients() {
     try { await loadClients(); await loadProjects(); }
     catch (e) { if (e.unauthorized) setAuthed(false); }
   }
-
   async function createProject(payload) {
     const r = await api.createProject(payload);
-    setShowNew(false);
-    setShowVoice(false);
+    setShowNew(false); setShowVoice(false);
     await refresh();
-    setOpenId(r.id); // jump straight into the new project
+    setOpenId(r.id);
   }
-
   async function logout() {
     await api.logout().catch(() => {});
-    setAuthed(false);
-    setUser(null);
-    setOpenId(null);
+    setAuthed(false); setUser(null); setOpenId(null);
   }
+
+  function go(v) { setOpenId(null); setView(v); setDrawer(false); }
 
   if (authed === null) return <div className="loading">Loading Deck…</div>;
   if (inviteToken && !authed) return <InviteSignup token={inviteToken} onSuccess={onAuthed} onCancel={clearInvite} />;
   if (!authed) return <Login onSuccess={onAuthed} />;
 
   const openProject = projects.find((p) => p.id === openId);
+  const firstName = (user?.name || 'there').split(' ')[0];
+  const initials = (user?.name || 'D').split(' ').map((s) => s[0]).slice(0, 2).join('').toUpperCase();
+
+  const navItem = (it) => (
+    <button
+      key={it.key}
+      className={'side-link' + (openId == null && view === it.key ? ' active' : '')}
+      onClick={() => go(it.key)}
+    >
+      <span className="ic"><Icon name={it.icon} /></span>
+      <span>{it.label}</span>
+    </button>
+  );
+
+  const sidebar = (cls = '') => (
+    <aside className={'sidebar' + cls}>
+      <div className="side-brand">
+        <div className="side-logo">FC</div>
+        <div>
+          <div className="side-brand-name">Full Chair</div>
+          <div className="side-brand-sub">Agency workspace</div>
+        </div>
+      </div>
+      <nav className="side-nav">
+        {PRIMARY.map(navItem)}
+        <div className="side-group-label">More</div>
+        {SECONDARY.map(navItem)}
+      </nav>
+      <div className="side-actions">
+        <button className="btn primary" onClick={() => { setShowNew(true); setDrawer(false); }}>＋ New project</button>
+        <button className="btn" onClick={() => { setShowVoice(true); setDrawer(false); }}><span className="ic-inline"><Icon name="mic" /></span> Speak</button>
+        <button className="btn" onClick={() => { setShowClients(true); setDrawer(false); }}><span className="ic-inline"><Icon name="people" /></span> Clients</button>
+        <button className="btn" onClick={() => { setShowTemplates(true); setDrawer(false); }}><span className="ic-inline"><Icon name="copy" /></span> Templates</button>
+      </div>
+      <div className="side-spacer" />
+      <div className="side-user">
+        <div className="side-avatar">{initials}</div>
+        <div>
+          <div className="side-user-name">{user?.name || 'You'}</div>
+          <div className="side-user-role">{user?.role === 'admin' ? 'Admin' : 'Member'}</div>
+        </div>
+        <button className="side-logout" onClick={logout}>Log out</button>
+      </div>
+    </aside>
+  );
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <button className="brand-btn" onClick={() => { setOpenId(null); setView('home'); }}>
-          <span className="brand-mark small">▚</span>
-          <span>Deck</span>
-        </button>
-        <div className="topbar-actions">
-          <button
-            className={'btn' + (openId == null && view === 'recurring' ? ' primary' : '')}
-            title="Recurring projects + tasks that keep happening"
-            onClick={() => { setOpenId(null); setView('recurring'); }}
-          >
-            <span className="mic-label">Recurring</span><span className="mic-ico">🔁</span>
-          </button>
-          <button
-            className={'btn' + (openId == null && view === 'tasks' ? ' primary' : '')}
-            title="Tasks assigned to me + handed off by me"
-            onClick={() => { setOpenId(null); setView('tasks'); }}
-          >
-            <span className="mic-label">My tasks</span><span className="mic-ico">✔</span>
-          </button>
-          <button
-            className={'btn' + (openId == null && view === 'responsibilities' ? ' primary' : '')}
-            title="Client roles & responsibilities"
-            onClick={() => { setOpenId(null); setView('responsibilities'); }}
-          >
-            <span className="mic-label">Roles</span><span className="mic-ico">🧾</span>
-          </button>
-          <button
-            className={'btn' + (openId == null && view === 'vault' ? ' primary' : '')}
-            title="Password vault"
-            onClick={() => { setOpenId(null); setView('vault'); }}
-          >
-            <span className="mic-label">Vault</span><span className="mic-ico">🔐</span>
-          </button>
-          {user?.role === 'admin' && (
-            <button className="btn" title="Team members" onClick={() => setShowMembers(true)}>
-              <span className="mic-label">Team</span><span className="mic-ico">👤</span>
-            </button>
-          )}
-          <button className="btn" title="Templates" onClick={() => setShowTemplates(true)}>
-            <span className="mic-label">Templates</span><span className="mic-ico">⧉</span>
-          </button>
-          <button className="btn" title="Manage clients" onClick={() => setShowClients(true)}>
-            <span className="mic-label">Clients</span><span className="mic-ico">👥</span>
-          </button>
-          <button className="btn mic" title="Speak a new project" onClick={() => setShowVoice(true)}>
-            <span className="mic-ico">🎤</span><span className="mic-label">Speak</span>
-          </button>
-          <button className="btn primary" onClick={() => setShowNew(true)}>＋ New project</button>
-          {user?.name && <span className="user-chip" title={user.email}>{user.name.split(' ')[0]}</span>}
-          <button className="btn ghost" onClick={logout}>Log out</button>
-        </div>
-      </header>
+    <div className="shell">
+      {sidebar()}
+      {drawer && <div className="drawer-scrim" onClick={() => setDrawer(false)} />}
+      {drawer && sidebar(' drawer-open')}
 
-      <main className="content">
+      <main className="main">
+        <div className="mobile-bar">
+          <div className="side-logo">FC</div>
+          <div>
+            <div className="side-brand-name">Full Chair</div>
+            <div className="side-brand-sub">Agency workspace</div>
+          </div>
+          <button className="mobile-menu-btn" onClick={() => setDrawer(true)}>☰ Menu</button>
+        </div>
+
         {openId != null ? (
           <ProjectDetail
             key={openId}
@@ -161,10 +177,24 @@ export default function App() {
             members={members}
             user={user}
             onManageClients={() => setShowClients(true)}
-            onBack={() => { setOpenId(null); }}
+            onBack={() => setOpenId(null)}
             onChanged={refresh}
             onDeleted={() => { setOpenId(null); refresh(); }}
           />
+        ) : view === 'dashboard' ? (
+          <Dashboard
+            projects={projects}
+            clients={clients}
+            user={user}
+            loading={loading}
+            onOpen={setOpenId}
+            onNew={() => setShowNew(true)}
+            onGo={go}
+          />
+        ) : view === 'schedule' ? (
+          <ScheduleView projects={projects} clients={clients} onOpen={setOpenId} />
+        ) : view === 'team' ? (
+          <TeamView user={user} members={members} onReload={loadMembers} />
         ) : view === 'recurring' ? (
           <RecurringView user={user} clients={clients} onOpen={setOpenId} onChanged={refresh} />
         ) : view === 'vault' ? (
@@ -179,6 +209,7 @@ export default function App() {
             loading={loading}
             clients={clients}
             user={user}
+            initialGroup="stage"
             onOpen={setOpenId}
             onNew={() => setShowNew(true)}
             onChanged={refresh}
@@ -195,9 +226,7 @@ export default function App() {
           onClientsChanged={reloadClients}
         />
       )}
-      {showVoice && (
-        <VoiceCapture onCreate={createProject} onClose={() => setShowVoice(false)} />
-      )}
+      {showVoice && <VoiceCapture onCreate={createProject} onClose={() => setShowVoice(false)} />}
       {showClients && (
         <ClientsManager clients={clients} members={members} onChanged={reloadClients} onClose={() => setShowClients(false)} />
       )}

@@ -214,13 +214,13 @@ function cmpDeadline(a, b) {
   return a.deadline < b.deadline ? -1 : a.deadline > b.deadline ? 1 : 0;
 }
 
-export default function Home({ projects, loading, clients = [], user, onOpen, onNew, onChanged }) {
+export default function Home({ projects, loading, clients = [], user, onOpen, onNew, onChanged, initialGroup }) {
   const [list, setList] = useState(projects);
   const [draggingId, setDraggingId] = useState(null);
   const [search, setSearch] = useState('');
   const [sortMode, setSortMode] = useState(() => localStorage.getItem('deck.sort') || 'custom');
   const [clientFilter, setClientFilter] = useState(() => localStorage.getItem('deck.clientFilter') || 'all');
-  const [groupBy, setGroupBy] = useState(() => localStorage.getItem('deck.groupBy') || 'buckets');
+  const [groupBy, setGroupBy] = useState(() => localStorage.getItem('deck.groupBy') || initialGroup || 'buckets');
   const listRef = useRef(list);
   listRef.current = list;
 
