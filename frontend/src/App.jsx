@@ -3,7 +3,7 @@ import { api } from './api.js';
 import Login from './Login.jsx';
 import InviteSignup from './InviteSignup.jsx';
 import Home from './Home.jsx';
-import Planner from './Planner.jsx';
+import Dashboard from './Dashboard.jsx';
 import ScheduleView from './ScheduleView.jsx';
 import TeamView from './TeamView.jsx';
 import MyTasks from './MyTasks.jsx';
@@ -19,7 +19,7 @@ import TemplatesModal from './TemplatesModal.jsx';
 import { Icon } from './Icon.jsx';
 
 const PRIMARY = [
-  { key: 'dashboard', label: 'Plan', icon: 'grid' },
+  { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { key: 'pipeline', label: 'Pipeline', icon: 'columns' },
   { key: 'schedule', label: 'Schedule', icon: 'calendar' },
   { key: 'team', label: 'Team', icon: 'people' },
@@ -182,12 +182,14 @@ export default function App() {
             onDeleted={() => { setOpenId(null); refresh(); }}
           />
         ) : view === 'dashboard' ? (
-          <Planner
+          <Dashboard
             projects={projects}
             clients={clients}
             user={user}
+            loading={loading}
             onOpen={setOpenId}
             onNew={() => setShowNew(true)}
+            onGo={go}
           />
         ) : view === 'schedule' ? (
           <ScheduleView projects={projects} clients={clients} onOpen={setOpenId} />
