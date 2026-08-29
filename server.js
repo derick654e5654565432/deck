@@ -864,6 +864,97 @@ app.post('/api/voice/transcribe', requireAuth, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message || 'transcription failed' }); }
 });
 
+// ---- planner (day-column plan board) -------------------------------------
+const ownPlan = (id, uid) => db.prepare('SELECT * FROM plan_blocks WHERE id = ? AND owner_id = ?').get(Number(id), uid);
+const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+
+// Enrich a raw plan_blocks row with the project/todo card data the board needs.
+function enrichPlan(b) {
+  const out = { id: b.id, kind: b.kind, ref_id: b.ref_id, day: b.day, sort: b.sort, duration_min: b.duration_min, done: !!b.done };
+  if (b.kind === 'todo') {
+    const t = db.prepare('SELECT id, text, done, project_id, recurrence FROM todos WHERE id = ?').get(b.ref_id);
+    if (!t) return null;
+    const p = db.prepare('SELECT p.name, p.status, p.client_id, c.name AS client_name, (c.logo_stored IS NOT NULL) AS client_has_logo, c.updated_at AS client_updated FROM projects p LEFT JOIN clients c ON c.id = p.client_id WHERE p.id = ?').get(t.project_id);
+    out.title = t.text; out.project_id = t.project_id; out.project_name = p?.name || ''; out.status = p?.status || null;
+    out.client_id = p?.client_id || null; out.client_name = p?.client_name || null; out.client_has_logo = p ? !!p.client_has_logo : 0; out.client_updated = p?.client_updated || null;
+    out.todo_done = !!t.done; out.recurrence = t.recurrence || null;
+  } else {
+    const p = db.prepare('SELECT p.id, p.name, p.status, p.client_id, c.name AS client_name, (c.logo_stored IS NOT NULL) AS client_has_logo, c.updated_at AS client_updated FROM projects p LEFT JOIN clients c ON c.id = p.client_id WHERE p.id = ?').get(b.ref_id);
+    if (!p) return null;
+    out.title = p.name; out.project_id = p.id; out.project_name = p.name; out.status = p.status;
+    out.client_id = p.client_id || null; out.client_name = p.client_name || null; out.client_has_logo = !!p.client_has_logo; out.client_updated = p.client_updated || null;
+  }
+  return out;
+}
+
+app.get('/api/plan', requireAuth, (req, res) => {
+  const from = isDay(req.query.from) ? req.query.from : null;
+  const to = isDay(req.query.to) ? req.query.to : null;
+  const rows = (from && to)
+    ? db.prepare('SELECT * FROM plan_blocks WHERE owner_id = ? AND day BETWEEN ? AND ? ORDER BY day, sort, id').all(req.user.id, from, to)
+    : db.prepare('SELECT * FROM plan_blocks WHERE owner_id = ? ORDER BY day, sort, id').all(req.user.id);
+  res.json({ blocks: rows.map(enrichPlan).filter(Boolean) });
+});
+
+app.post('/api/plan', requireAuth, (req, res) => {
+  let { kind, ref_id, day, duration_min } = req.body || {};
+  if (!['project', 'todo'].includes(kind)) return res.status(400).json({ error: 'kind must be project or todo' });
+  if (!isDay(day)) return res.status(400).json({ error: 'valid day (YYYY-MM-DD) required' });
+  ref_id = Number(ref_id);
+  const reachable = kind === 'project' ? canCollaborate(ref_id, req.user.id) : collabTodo(ref_id, req.user.id);
+  if (!reachable) return res.status(404).json({ error: 'not found' });
+  const dur = Math.max(15, Math.min(600, Number(duration_min) || 60));
+  const now = Date.now();
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM plan_blocks WHERE owner_id = ? AND day = ?').get(req.user.id, day).m;
+  const r = db.prepare('INSERT INTO plan_blocks (owner_id, kind, ref_id, day, sort, duration_min, done, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)')
+    .run(req.user.id, kind, ref_id, day, maxSort + 1, dur, now, now);
+  res.json({ id: Number(r.lastInsertRowid) });
+});
+
+app.put('/api/plan/:id', requireAuth, (req, res) => {
+  const cur = ownPlan(req.params.id, req.user.id);
+  if (!cur) return res.status(404).json({ error: 'not found' });
+  const day = req.body.day === undefined ? cur.day : (isDay(req.body.day) ? req.body.day : cur.day);
+  const sort = req.body.sort === undefined ? cur.sort : (Number(req.body.sort) || 0);
+  const duration_min = req.body.duration_min === undefined ? cur.duration_min : Math.max(15, Math.min(600, Number(req.body.duration_min) || cur.duration_min));
+  const done = req.body.done === undefined ? cur.done : (req.body.done ? 1 : 0);
+  // Ticking a to-do block ticks the underlying to-do too (respecting recurrence).
+  if (req.body.done !== undefined && cur.kind === 'todo') {
+    const t = db.prepare('SELECT * FROM todos WHERE id = ?').get(cur.ref_id);
+    if (t && canCollaborate(t.project_id, req.user.id)) {
+      if (t.recurrence && done) db.prepare('UPDATE todos SET last_done_at = ?, done = 0, updated_at = ? WHERE id = ?').run(Date.now(), Date.now(), t.id);
+      else db.prepare('UPDATE todos SET done = ?, updated_at = ? WHERE id = ?').run(done, Date.now(), t.id);
+    }
+  }
+  db.prepare('UPDATE plan_blocks SET day = ?, sort = ?, duration_min = ?, done = ?, updated_at = ? WHERE id = ?')
+    .run(day, sort, duration_min, done, Date.now(), cur.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/plan/reorder', requireAuth, (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  const fallbackDay = isDay(req.body?.day) ? req.body.day : null;
+  const upd = db.prepare('UPDATE plan_blocks SET day = ?, sort = ?, updated_at = ? WHERE id = ? AND owner_id = ?');
+  const now = Date.now();
+  db.exec('BEGIN');
+  try {
+    for (const it of items) {
+      const d = isDay(it.day) ? it.day : fallbackDay;
+      if (!d) continue;
+      upd.run(d, Number(it.sort) || 0, now, Number(it.id), req.user.id);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: e.message }); }
+  res.json({ ok: true });
+});
+
+app.delete('/api/plan/:id', requireAuth, (req, res) => {
+  const cur = ownPlan(req.params.id, req.user.id);
+  if (!cur) return res.status(404).json({ error: 'not found' });
+  db.prepare('DELETE FROM plan_blocks WHERE id = ?').run(cur.id);
+  res.json({ ok: true });
+});
+
 // Multer / body errors -> clean JSON.
 app.use((err, req, res, next) => {
   if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'file too large (max 25 MB)' });
