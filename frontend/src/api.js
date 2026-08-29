@@ -60,6 +60,12 @@ export const api = {
   deleteProject: (id) => req('DELETE', `/api/projects/${id}`),
   reorderProjects: (items) => req('POST', '/api/projects/reorder', { items }),
 
+  // calendar (4-day time-grid board)
+  plan: (from, to) => req('GET', `/api/plan?from=${from}&to=${to}`),
+  addPlan: (b) => req('POST', '/api/plan', b),
+  updatePlan: (id, b) => req('PUT', `/api/plan/${id}`, b),
+  deletePlan: (id) => req('DELETE', `/api/plan/${id}`),
+
   templates: () => req('GET', '/api/templates'),
   createTemplate: (name) => req('POST', '/api/templates', { name }),
   useTemplate: (id, name) => req('POST', `/api/templates/${id}/use`, { name }),
